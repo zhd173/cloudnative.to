@@ -11,11 +11,11 @@ avatar: "/images/profile/haidong.jpeg"
 profile: "多点生活（成都）云原生开发工程师。"
 ---
 
-本篇主要探讨上一篇源码分析中留下的问题，如 EnvoyXdsServer 是如何工作的，以及 xDS 的下发流程。对推送事件的防抖、`SidecarScope` 的运用做一些细致的分析。
+本篇主要探讨上一篇源码分析中留下的问题，如 `EnvoyXdsServer` 是如何工作的，以及 xDS 的下发流程。对推送事件的防抖、`SidecarScope` 的运用做一些细致的分析。
 
 ## EnvoyXdsServer
 
-EnvoyXdsServer 主要负责 Pilot 中 xDS 协议的生成和下发，接收并处理 `configController` 和 `serviceController` 推送的 PushRequest ，与集群中所有的数据面代理进行 gRPC 通信，并处理它们的请求。在 Pilot Server 中的定义如下：
+`EnvoyXdsServer` 主要负责 Pilot 中 xDS 协议的生成和下发，接收并处理 `configController` 和 `serviceController` 推送的 PushRequest ，与集群中所有的数据面代理进行 gRPC 通信，并处理它们的请求。在 Pilot Server 中的定义如下：
 
 ```go
 // Server contains the runtime configuration for the Pilot discovery service.
@@ -24,7 +24,7 @@ type Server struct {
 }
 ```
 
-EnvoyXdsServer 只是 Pilot Server 中的别名，真正的 `xds.DiscoveryServer` 结构在 `istio/pilot/pkg/xds/discovery.go:71` 中，这里只保留关键的字段进行说明：
+`EnvoyXdsServer` 只是 Pilot Server 中的别名，真正的 `xds.DiscoveryServer` 结构在 `istio/pilot/pkg/xds/discovery.go:71` 中，这里只保留关键的字段进行说明：
 
 ```go
 // DiscoveryServer is Pilot's gRPC implementation for Envoy's v2 xds APIs
@@ -54,7 +54,7 @@ type DiscoveryServer struct {
 
 ![pilot-discovery init](./images/pilot-discovery-sequence-init.png)
 
-在初始化 `grpcServer` 的时候，调用了 `DiscoveryServer.Register()` 方法，向 `grpcServer` 注册了以下几个服务（以 v2 版本为例）：
+在初始化 grpcServer 的时候，调用了 `DiscoveryServer.Register()` 方法，向 grpcServer 注册了以下几个服务（以 v2 版本为例）：
 
 ```protobuf
 service AggregatedDiscoveryService {
@@ -77,7 +77,7 @@ service AggregatedDiscoveryService {
 
 xDS 相关的介绍可以参考 Envoy 的文档：[xDS REST and gRPC protocol](https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol) ，写的很详细。
 
-EnvoyXdsServer 在启动方法 `Start()` 中开启了两个比较重要的协程 `handleUpdates` 和 `sendPushes` 。 `handleUpdates` 主要用来处理 `pushChannel` 中收到的推送请求以及防抖。 `sendPushes` 则负责具体的推送。
+`EnvoyXdsServer` 在启动方法 Start() 中开启了两个比较重要的协程 `handleUpdates` 和 `sendPushes` 。 `handleUpdates` 主要用来处理 `pushChannel` 中收到的推送请求以及防抖。 `sendPushes` 则负责具体的推送。
 
 ```go
 func (s *DiscoveryServer) Start(stopCh <-chan struct{}) {
@@ -109,11 +109,11 @@ func (s *DiscoveryServer) StreamAggregatedResources(stream discovery.AggregatedD
 
 ### Receive Change
 
-一切准备就绪之后， EnvoyXdsServer 开始接收来自 `configController` 和 `serviceController` 的配置变化事件，包括服务数据的变化和配置数据的变化，都会创建 PushRequest 发送至 EnvoyXdsServer 的 `pushChannel` :
+一切准备就绪之后， `EnvoyXdsServer` 开始接收来自 `configController` 和 `serviceController` 的配置变化事件，包括服务数据的变化和配置数据的变化，都会创建 PushRequest 发送至 `EnvoyXdsServer` 的 `pushChannel` :
 
 ![EnvoyXdsServer Receive Change](./images/envoyxdsserver-receive-change.png)
 
-PushRequest 包含是否全量推送的标识以及主要更改的资源类型。全部统一推送到 `pushChannel` 之后，就由 EnvoyXdsServer 启动时创建的协程 `handleUpdates` 来处理了。
+PushRequest 包含是否全量推送的标识以及主要更改的资源类型。全部统一推送到 `pushChannel` 之后，就由 `EnvoyXdsServer` 启动时创建的协程 `handleUpdates` 来处理了。
 
 ### Handle Updates
 
@@ -142,9 +142,9 @@ func (s *DiscoveryServer) handleUpdates(stopCh <-chan struct{}) {
 
 从上面这个例子可以引申出几个概念，一个是最小静默时间，一个是最大延迟时间。最小静默时间就是上面的 10 秒钟，从上一个进电梯的人开始计时，10 秒内有新的人进来就接着等，否则就不等，每进一个人就重新计算这个时间。最大延迟时间就是上面电梯等待的 3 分钟，到了这个时间就算还有很多人没有进电梯，电梯也必须走。另外一个防抖中的重要概念就是分组合并，比如把都去偶数层的人统一在一趟电梯上。
 
-EnvoyXdsServer 的防抖函数也一样，把要推送的请求根据资源类型、事件类型分组或者合并，并在 `minQuite` 时间内等待下一个请求，超过 `maxDelay` 时间就进行下一步处理。
+`EnvoyXdsServer` 的防抖函数也一样，把要推送的请求根据资源类型、事件类型分组或者合并，并在 `minQuite` 时间内等待下一个请求，超过 `maxDelay` 时间就进行下一步处理。
 
-在 `Pilot` 中最小静默时间可以通过 `PILOT_DEBOUNCE_AFTER` 这个环境变量设置，默认为 100 毫秒，最大延迟时间可以通过 `PILOT_DEBOUNCE_MAX` 设置，默认为 10 秒。
+在 Pilot 中最小静默时间可以通过 `PILOT_DEBOUNCE_AFTER` 这个环境变量设置，默认为 100 毫秒，最大延迟时间可以通过 `PILOT_DEBOUNCE_MAX` 设置，默认为 10 秒。
 
 ```go
 // isti/pilot/pkg/features/pilot.go
@@ -190,7 +190,7 @@ pushWorker := func() {
 }
 ```
 
-可以看到当事件的延迟时间大于等于最大延迟时间或静默时间大于等于最小静默时间，才会执行真正的 `push()` 方法。 `push()` 方法也是 `debounce` 方法中包装的一个过程函数，它会在怎正的 `pushFn()` 完成后向 `freeCh` 发送消息表示这次防抖处理完成了，可以开始下一次防抖。
+可以看到当事件的延迟时间大于等于最大延迟时间或静默时间大于等于最小静默时间，才会执行 push() 方法。 push() 方法也是 `debounce` 方法中包装的一个过程函数，它会在真正的 `pushFn()` 完成后向 `freeCh` 发送消息表示这次防抖处理完成了，可以开始下一次防抖。
 
 ```go
 push := func(req *model.PushRequest) {
@@ -199,7 +199,7 @@ push := func(req *model.PushRequest) {
 }
 ```
 
-`debounce()` 方法等待各个 `channel` 的逻辑如下：
+`debounce()` 方法等待各个 channel 的逻辑如下：
 
 ```go
 for {
@@ -236,7 +236,7 @@ for {
 }
 ```
 
-先看 `case r:= <-ch` 这个分支，当收到第一个 PushRequest 的时候，通过一个延时器 `timeChan` 先延迟一个最小静默时间（100 毫秒），期间接收新的请求直接进行 `Merge` ，同时累加已防抖的事件个数。当第一个 100 毫秒计时结束就会进入 `case <-timeChan` 分支，会判断是否有正在执行的防抖过程，没有的话就执行 `pushWorker()` 做一次防抖判断看是否需要推送。如果第一个请求的延迟时间还没有超过最大延迟时间（10 秒钟）并且距离处理上一次 PushRequest 的时间不足最小静默时间（100 毫秒），则继续延时，等待 `debouncedAfter - quietTime` 也就是不足最小静默时间的部分，再进行下一次 `pushWorker()` 操作。
+先看 `case r:= <-ch` 这个分支，当收到第一个 PushRequest 的时候，通过一个延时器 `timeChan` 先延迟一个最小静默时间（100 毫秒），期间接收新的请求直接进行 Merge ，同时累加已防抖的事件个数。当第一个 100 毫秒计时结束就会进入 `case <-timeChan` 分支，会判断是否有正在执行的防抖过程，没有的话就执行 `pushWorker()` 做一次防抖判断看是否需要推送。如果第一个请求的延迟时间还没有超过最大延迟时间（10 秒钟）并且距离处理上一次 PushRequest 的时间不足最小静默时间（100 毫秒），则继续延时，等待 `debouncedAfter - quietTime` 也就是不足最小静默时间的部分，再进行下一次 `pushWorker()` 操作。
 
 在看真正的 `pushFn` 函数之前，我们先了解下防抖函数是怎么合并 PushRequest 的。
 
@@ -303,7 +303,7 @@ const (
 
 
 
-而 `ConfigsUpdated` 跟踪了所有已经发生变化的配置，这个 Map 主要被用于那些被 [Sidecar](https://istio.io/latest/docs/reference/config/networking/sidecar/) 限定了服务可见性的数据面代理，来过滤不必接收的 xDS 推送。只有与这些代理相关的服务（如 Sidecar 中定义的 `Egress` 和 `Ingress` ）发生变化时，才推送到特定的客户端。当 `ConfigsUpdated` 为空时，则表示所有的数据面代理都会收到这次推送。
+而 `ConfigsUpdated` 跟踪了所有已经发生变化的配置，这个 Map 主要被用于那些被 [Sidecar](https://istio.io/latest/docs/reference/config/networking/sidecar/) 限定了服务可见性的数据面代理，来过滤不必接收的 xDS 推送。只有与这些代理相关的服务（如 Sidecar 中定义的 Egress 和 Ingress ）发生变化时，才推送到特定的客户端。当 `ConfigsUpdated` 为空时，则表示所有的数据面代理都会收到这次推送。
 
 所以才有上面代码中 `if len(first.ConfigsUpdated) > 0 && len(other.ConfigsUpdated) > 0` 这个判断，只要有一个请求需要推送至所有代理，就不会合并 `ConfigUpdated` 。
 
@@ -420,7 +420,7 @@ type PushQueue struct {
 
 ### Send Pushes
 
-当所有的 PushRequest 经过防抖等一系列处理后，重新入队到 `pushQueue` ，这时在 EnvoyXdsServer 启动时创建的协程 `sendPushes` 就开始工作了。
+当所有的 PushRequest 经过防抖等一系列处理后，重新入队到 `pushQueue` ，这时在 `EnvoyXdsServer` 启动时创建的协程 `sendPushes` 就开始工作了。
 
 ```go
 func (s *DiscoveryServer) Start(stopCh <-chan struct{}) {
@@ -439,7 +439,7 @@ func (s *DiscoveryServer) sendPushes(stopCh <-chan struct{}) {
 
 ![EnvoyXdsServer Send Pushes](./images/envoyxdsserver-sendpushes.png)
 
-首先从 `pushQueue` 中通过 `Dequeue()` 方法获取需要处理的代理客户端和对应的 PushRequest ，再根据 PushRequest 生成 Event 传入客户端的 `pushChannel` 中，注意和 EnvoyXdsServer 的 `pushChannel` 不同，这里的是针对当前客户端连接的 `pushChannel` 。
+首先从 `pushQueue` 中通过 `Dequeue()` 方法获取需要处理的代理客户端和对应的 PushRequest ，再根据 PushRequest 生成 Event 传入客户端的 `pushChannel` 中，注意和 `EnvoyXdsServer` 的 `pushChannel` 不同，这里的是针对当前客户端连接的 `pushChannel` 。
 
 ```go
 func doSendPushes(stopCh <-chan struct{}, semaphore chan struct{}, queue *PushQueue) {
@@ -868,6 +868,6 @@ func (s *DiscoveryServer) processRequest(discReq *discovery.DiscoveryRequest, co
 
 ### 总结
 
-限于篇幅， xDS 的生成逻辑我们将在下一篇源码分析中讲解，也就是生成器中构建 xDS 的地方，这部分涉及到很多数据的转化，内容繁杂，需要整篇分析才能讲解的清楚。
+xDS 的推送流程到这里就讲完了。我们从 `EnvoyXdsServer` 的结构开始，对其启动流程、怎么与客户端建立连接、怎么感知配置和服务变化、怎么防抖、怎么推送、`SidecarScope` 如何工作等都做了比较细致的分析，虽然已经阅读了源码，但是距离服务网格化的实际落地、实践中的各种性能问题、针对业务的优化，我们还有很长一段路要走。
 
-xDS 的推送流程到这里就讲完了。我们从 EnvoyXdsServer 的结构开始，对其启动流程、怎么与客户端建立连接、怎么感知配置和服务变化、怎么防抖、怎么推送、`SidecarScope` 如何工作等都做了比较细致的分析，虽然已经阅读了源码，但是距离服务网格化的实际落地、实践中的各种性能问题、针对业务的优化，我们还有很长一段路要走。希望今天的文章只是开始，请关注本系列后续的分析，与君共勉。
+限于篇幅， xDS 的生成逻辑我们将在下一篇源码分析中讲解，也就是生成器中构建 xDS 的地方，这部分涉及到很多数据的转化，内容繁杂，需要整篇分析才能讲解的清楚。
